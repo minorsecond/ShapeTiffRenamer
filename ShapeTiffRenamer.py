@@ -33,7 +33,7 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         QtWidgets.QMainWindow.__init__(self)
         Ui_MainWindow.__init__(self)
         self.setupUi(self)
-        self.setFixedSize(800, 140)  # no resizing
+        self.setFixedSize(800, 180)  # no resizing
         self.output_text = ''
         self.image_root_set = False
         self.shp_root_set = False
@@ -46,7 +46,10 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         self.ProcessButton.clicked.connect(self.handle_tab1_process_button)
         self.BrowseForImageRoot.clicked.connect(self.handle_img_root_browse)
         self.BrowseForShapeRoot.clicked.connect(self.handle_shp_root_browse)
+
+        self.BrowseForImageDir.clicked.connect(self.handle_img_root_browse)
         self.BrowseForOutputDir.clicked.connect(self.handle_output_dir_browse)
+        self.BrowseForDb.clicked.connect(self.handle_browse_for_db)
 
         self.all_files = 0
         self.total_files = 0
@@ -90,7 +93,11 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         """
 
         openfile = QtWidgets.QFileDialog.getExistingDirectory(self)
-        self.ImageRootInputEdit.setText(openfile)
+
+        try:
+            self.ImageRootInputEdit.setText(openfile)
+        except AttributeError as e:
+            print("No image directory selected")
 
         if openfile:
             self.image_root_set = True
@@ -104,7 +111,11 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         self.shp_root_set = False
 
         openfile = QtWidgets.QFileDialog.getExistingDirectory(self)
-        self.ShapeRootInputEdit.setText(openfile)
+
+        try:
+            self.ShapeRootInputEdit.setText(openfile)
+        except AttributeError as e:
+            print("No shape directory selected")
 
         if openfile:
             self.shp_root_set = True
@@ -118,11 +129,27 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         self.working_directory_set = False
 
         openfile = QtWidgets.QFileDialog.getExistingDirectory(self)
-        self.OutputDirectoryEdit.setText(openfile)
+
+        try:
+            self.OutputDirectoryEdit.setText(openfile)
+        except AttributeError:
+            print("No Image output dir selected")
 
         if openfile:
             self.working_directory_set = True
             self.process_button_enabler()
+
+    def handle_browse_for_db(self):
+        """Handles user clicking db browse button"""
+
+        self.db_path_set = False
+
+        openfile = QtWidgets.QFileDialog.getOpenFileName(self)
+
+        try:
+            self.OutputDirectoryEdit_2.setText(openfile)
+        except AttributeError:
+            print("No DB path selected.")
 
     def process_button_enabler(self):
         """
