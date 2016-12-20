@@ -18,12 +18,12 @@ import datetime
 TEST = True
 
 
-class GUI(QtGui.QMainWindow, Ui_MainWindow):
+class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
     def __init__(self):
 
         super(GUI, self).__init__()
 
-        QtGui.QMainWindow.__init__(self)
+        QtWidgets.QMainWindow.__init__(self)
         Ui_MainWindow.__init__(self)
         self.setupUi(self)
         self.setFixedSize(800, 140)  # no resizing
@@ -555,7 +555,7 @@ def get_datetime():
 
 
 if __name__ == '__main__':
-    app = QtGui.QApplication(argv)
+    app = QtWidgets.QApplication(argv)
     window = GUI()
     window.show()
     exit(app.exec_())
