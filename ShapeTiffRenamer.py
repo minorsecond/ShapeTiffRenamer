@@ -85,7 +85,7 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         Handles user clicking browse for image root path
         """
 
-        openfile = QtGui.QFileDialog.getExistingDirectory(self)
+        openfile = QtWidgets.QFileDialog.getExistingDirectory(self)
         self.ImageRootInputEdit.setText(openfile)
 
         if openfile:
@@ -98,7 +98,7 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         """
         self.shp_root_set = False
 
-        openfile = QtGui.QFileDialog.getExistingDirectory(self)
+        openfile = QtWidgets.QFileDialog.getExistingDirectory(self)
         self.ShapeRootInputEdit.setText(openfile)
 
         if openfile:
@@ -111,7 +111,7 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         """
         self.working_directory_set = False
 
-        openfile = QtGui.QFileDialog.getExistingDirectory(self)
+        openfile = QtWidgets.QFileDialog.getExistingDirectory(self)
         self.OutputDirectoryEdit.setText(openfile)
 
         if openfile:
@@ -193,11 +193,11 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
                                 if index_counter == 0:  # Imagery step
                                     sid = file[0]
 
-                                    if "PAN" in file:
+                                    if "PAN" in file or "pan" in file:
                                         image_type = 'PAN'
                                         type_destination = join(destination, 'PAN')  # set shp dest path
 
-                                    elif 'PSH' in file:
+                                    elif 'PSH' in file or 'psh' in file:
                                         image_type = 'PSH'
                                         type_destination = join(destination, 'PSH')  # set shp dest path
 
@@ -213,7 +213,7 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
 
                                 if index_counter == 1:  # shape
                                     image_ids = tuple(image_ids)  # we don't need this as an array now
-                                    if 'PIXEL' in file:  # only want the PIXEL_SHAPE files
+                                    if 'PIXEL' in file or 'pixel' in file:  # only want the PIXEL_SHAPE files
                                         sid, type = match_shp_to_image(file, image_ids)
 
                                 if sid:
