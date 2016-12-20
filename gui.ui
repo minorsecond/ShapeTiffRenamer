@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>800</width>
+    <height>186</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Image &amp; Shape Renamer</string>
+  </property>
+  <widget class="QWidget" name="centralwidget">
+   <widget class="QLabel" name="label">
+    <property name="geometry">
+     <rect>
+      <x>28</x>
+      <y>28</y>
+      <width>109</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Image Root Directory</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="OutputDirectoryEdit">
+    <property name="geometry">
+     <rect>
+      <x>164</x>
+      <y>90</y>
+      <width>303</width>
+      <height>20</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_4">
+    <property name="geometry">
+     <rect>
+      <x>594</x>
+      <y>28</y>
+      <width>81</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Image File Type</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="BrowseForImageRoot">
+    <property name="geometry">
+     <rect>
+      <x>478</x>
+      <y>26</y>
+      <width>75</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Browse</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="ShapeRootInputEdit">
+    <property name="geometry">
+     <rect>
+      <x>164</x>
+      <y>58</y>
+      <width>303</width>
+      <height>20</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="BrowseForOutputDir">
+    <property name="geometry">
+     <rect>
+      <x>478</x>
+      <y>90</y>
+      <width>75</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Browse</string>
+    </property>
+   </widget>
+   <widget class="QLineEdit" name="ImageRootInputEdit">
+    <property name="geometry">
+     <rect>
+      <x>164</x>
+      <y>26</y>
+      <width>303</width>
+      <height>20</height>
+     </rect>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_3">
+    <property name="geometry">
+     <rect>
+      <x>28</x>
+      <y>92</y>
+      <width>109</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Output Directory</string>
+    </property>
+   </widget>
+   <widget class="QComboBox" name="ImageTypeCombo">
+    <property name="geometry">
+     <rect>
+      <x>700</x>
+      <y>26</y>
+      <width>69</width>
+      <height>22</height>
+     </rect>
+    </property>
+    <item>
+     <property name="text">
+      <string>.img</string>
+     </property>
+    </item>
+    <item>
+     <property name="text">
+      <string>.tif</string>
+     </property>
+    </item>
+   </widget>
+   <widget class="QPushButton" name="ProcessButton">
+    <property name="geometry">
+     <rect>
+      <x>698</x>
+      <y>90</y>
+      <width>75</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Process</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="BrowseForShapeRoot">
+    <property name="geometry">
+     <rect>
+      <x>478</x>
+      <y>58</y>
+      <width>75</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Browse</string>
+    </property>
+   </widget>
+   <widget class="QLabel" name="label_2">
+    <property name="geometry">
+     <rect>
+      <x>28</x>
+      <y>60</y>
+      <width>109</width>
+      <height>16</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Shape Root Directory</string>
+    </property>
+   </widget>
+   <widget class="QPushButton" name="ClearButton">
+    <property name="geometry">
+     <rect>
+      <x>610</x>
+      <y>90</y>
+      <width>75</width>
+      <height>23</height>
+     </rect>
+    </property>
+    <property name="text">
+     <string>Clear</string>
+    </property>
+   </widget>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <property name="geometry">
+    <rect>
+     <x>0</x>
+     <y>0</y>
+     <width>800</width>
+     <height>21</height>
+    </rect>
+   </property>
+  </widget>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
