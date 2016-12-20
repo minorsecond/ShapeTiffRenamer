@@ -1,21 +1,28 @@
+__author__ = 'td27097'
 """
 Rename shape and image files to match for ERDAS Imagine processing
 Ross Wardrup
 """
 
-# TODO: Add lowercase "pan" and "psh" to the search lists.
-
 import sys
-from hashlib import sha1
 from os import walk, makedirs, path
-from os.path import join, splitext, exists
+from os.path import join, splitext, exists, dirname, realpath
 from shutil import copyfile
 from sys import exit, argv
+from functools import partial
+import pyproj
 from gui import *
 import logging
 import datetime
+import gdal
+import ogr
+import ntpath
+from shapely.geometry import Polygon, Point  # For centroid calculation
+from shapely.ops import transform
 
-TEST = True
+# TODO: Incorporate gdaladdo to build pyramids
+
+TEST = False
 
 
 class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
@@ -58,9 +65,6 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         self.process_button_enabler()
         self.ProcessButton.setText("Process")
 
-    def handle_tab2_clear_button(self):
-        pass
-
     def handle_tab1_process_button(self):
         """
         Handles the process button clicked event
@@ -78,7 +82,7 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         self.ProcessButton.setDisabled(True)
         if len(self.ImageRootInputEdit.text()) > 0 and len(self.ShapeRootInputEdit.text()) > 0 \
                 and len(self.OutputDirectoryEdit.text()) > 0:
-            self.main(payload)
+            runner(payload)
 
     def handle_img_root_browse(self):
         """
@@ -96,6 +100,7 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         """
         Handles user clicking browse for shp root path
         """
+
         self.shp_root_set = False
 
         openfile = QtWidgets.QFileDialog.getExistingDirectory(self)
@@ -109,6 +114,7 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         """
         Handles user clicking browse for output dir
         """
+
         self.working_directory_set = False
 
         openfile = QtWidgets.QFileDialog.getExistingDirectory(self)
@@ -132,6 +138,7 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         """
         Updates the output window when finished.
         """
+
         self.ProcessButton.setEnabled(True)
         app.processEvents()
 
@@ -141,128 +148,121 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
         :param paths: tuple. first is image path, second is shp path
         :return: Tuple (orig path, new path, id)
         """
-
+        files = []
+        matched_files = {}
+        match = []
+        image_paths = []
+        shape_paths = []
         image_ids = []
-        index_counter = 0
         step = None
-        extensions_to_search = None
-
+        extensions_to_search = []
+        copier_payload = []
         shp_extensions = ('.shp', '.dbf', '.shx', '.prj')
 
-        if exists(destination):  # only run if the destination exists
+        if exists(destination):
+            if image_extension == '.img':
+                extensions_to_search.append(".ige")
+                extensions_to_search.append(".rrd")
 
-            for path in paths:  # for image and shape path...
+            # List of tuples that contain (image_filename, shape_filename)
 
-                files = []
+            # Generate list of filepaths to imagery and shapedata
+            print("* Creating file lists...")
+            for (dirpath, dirnames, filenames) in walk(paths[0]):
+                for file in filenames:
+                    if splitext(file)[1] == image_extension:  # Only catch image files
+                        image_paths.append(join(dirpath, file))
 
-                if index_counter == 0:  # image files
-                    step = "imagery"
-                    if image_extension == '.img':
-                        extra_extensions = '.ige', '.rrd', '.rde'
-                        extensions_to_search = [image_extension, '.ige', '.rrd', '.rde']
+            for (dirpath, dirnames, filenames) in walk(paths[1]):
+                for file in filenames:
+                    if splitext(file)[1] == '.shp' and 'PIXEL' in file:  # OGR opens .shp extension
+                        shape_paths.append(join(dirpath, file))
+
+            print("* Testing shapes and rasters for spatial correlation...")
+            image_paths = set(image_paths)  # For speed
+            shape_paths = set(shape_paths)
+
+            match = []
+            for image in image_paths:
+                best_distance = None
+                best_match = None
+
+                for shape in shape_paths:
+                    # Run the actual intersection
+                    _, feature_centroid, layer_centroid = intersect_shape_and_tif(image, shape)
+
+                    current_distance, shape_cent, image_cent = distance_between_centroids(feature_centroid,
+                                                                                          layer_centroid)
+
+                    # get the closest match
+                    if best_distance:
+                        if current_distance < best_distance:
+                            best_distance = current_distance
+                            best_match = shape
                     else:
-                        extensions_to_search = image_extension
+                        best_distance = current_distance
+                        best_match = shape
 
-                if index_counter == 1:  # shapefiles
-                    step = 'shape data'
-                    extensions_to_search = shp_extensions
+                # dict of lists
+                matched_files[image] = best_match
 
-                    destination = join(destination, 'shp')  # set shp dest path
+            # input(matched_files)
+            # Now, move on to parsing filenames
+            print("\n* Parsing files...")
+            for image, shapefile in matched_files.items():
+                list_index_counter = 0
 
-                print("\n* Parsing {}...".format(step))
+                # Parse the imagery filenames
+                image_path = image
+                image_file = ntpath.basename(image_path)
+                image_extension = splitext(image_path)[1]
+                image_filename_list = listify_filename(image_file)
+                image_sid = image_filename_list[0]
 
-                for (dirpath, dirnames, filenames) in walk(path):  # for each path in path tuple...
-                    if "output" not in dirpath:
-                        for file in filenames:  # and for each file found...
-                            sid = None  # sid is the ID value that the file will be named
-                            image_type = None  # pan or psh
-                            type_destination = None  # destination path depending on image_type
-                            extension = splitext(file)[1]
+                if "PAN" in image_filename_list:
+                    image_type = 'PAN'
+                    image_type_destination = join(destination, 'PAN')  # set shp dest path
 
-                            # Split old filename to recreate new filename.
-                            if extension in extensions_to_search:  # don't process extra files
-                                if extension in extra_extensions:
-                                    print("Found extra file {}".format(file))
-                                    logging.info("Found extra file {}".format(file))
+                    new_image_filename = join(image_type_destination, "{0}_{1}{2}"
+                                              .format(image_sid,
+                                                      image_type,
+                                                      splitext(image)[1]))
 
-                                original_file_path = join(dirpath, file)
-                                file = file.replace('-', '_')  # replace hyphens with underscore
-                                file = file.replace('.', '_')  # replace periods with underscore
-                                file = file.split('_')  # split at underscores to create list
+                elif 'PSH' in image_filename_list:
+                    image_type = 'PSH'
+                    image_type_destination = join(destination, 'PSH')  # set shp dest path
 
-                                if index_counter == 0:  # Imagery step
-                                    sid = file[0]
+                    new_image_filename = join(image_type_destination, "{0}_{1}{2}"
+                                              .format(image_sid,
+                                                      image_type,
+                                                      splitext(image)[1]))
 
-                                    if "PAN" in file or "pan" in file:
-                                        image_type = 'PAN'
-                                        type_destination = join(destination, 'PAN')  # set shp dest path
+                else:
+                    image_type = 'Uncategorized'
+                    image_type_destination = None
+                    text = "- WARNING: Could not categorize image {}" \
+                        .format(image)
+                    logging.warning(text)
+                    print(text)
 
-                                    elif 'PSH' in file or 'psh' in file:
-                                        image_type = 'PSH'
-                                        type_destination = join(destination, 'PSH')  # set shp dest path
+                    # Don't rename - just copy. Will have to manually modify name to
+                    # be sure it's accurate.
+                    new_filename = image_file
 
-                                    else:
-                                        image_type = 'Uncategorized'
-                                        type_destination = "uncategorized_images"
-                                        text = "- WARNING: Could not categorize image {}" \
-                                            .format(original_file_path)
-                                        logging.warning(text)
+                # Parse the fhape filenames
+                shape_path = shapefile
+                shape_file = ntpath.basename(shape_path)
+                shape_name = ntpath.basename(shape_path)[0]
+                shape_extension = splitext(shape_path)[1]
+                shape_filename_list = listify_filename(shape_file)
 
-                                    image_info = (file[0], image_type)
-                                    image_ids.append(image_info)
+                files_to_copy = (image_path, new_image_filename, shape_path, image_sid)
+                copier_payload.append(files_to_copy)
 
-                                if index_counter == 1:  # shape
-                                    image_ids = tuple(image_ids)  # we don't need this as an array now
-                                    if 'PIXEL' in file or 'pixel' in file:  # only want the PIXEL_SHAPE files
-                                        sid, type = match_shp_to_image(file, image_ids)
+            text = "\t - Copying {}".format(step)
 
-                                if sid:
-                                    # Sort images based on pan or psh
-                                    if image_type in ["PSH", "PAN"]:
-                                        new_filename = join(type_destination, "{0}_{1}{2}"
-                                                            .format(sid,
-                                                                    image_type,
-                                                                    splitext(original_file_path)[1]))
-
-                                    # Don't rename - just copy. Will have to manually modify name to
-                                    # be sure it's accurate.
-                                    elif image_type == 'Uncategorized':
-                                        new_filename = join(type_destination, "{0}".format(file))
-
-                                    else:
-                                        new_filename = join(destination, "{0}_{1}{2}"
-                                                            .format(sid, type,
-                                                                    splitext(original_file_path)[1]))
-
-                                    file = (original_file_path, new_filename, sid, image_type)
-                                    files.append(file)
-
-                                else:
-                                    if splitext(original_file_path)[1] == '.shp':
-                                        text = ("- ERROR: could not match image with "
-                                                "filename {}"
-                                                .format(original_file_path))
-                                        logging.error(text)
-
-                                self.files_processed += 1
-
-                text = "\t - Copying {}".format(step)
-
-                if len(files) > 0:
-                    # Filter duplicate output files
-                    # seen = set()
-                    # out = []
-
-                    # for a,b,c,d in files:
-                    #    if b not in seen:
-                    #        out.append((a,b,c,d))
-                    #        seen.add(b)
-
-                    # files = out
-
-                    file_copier(files, destination)  # copy the files
-
-                index_counter += 1  # increment the counter to begin copying shp
+            if len(copier_payload) > 0:
+                file_copier(copier_payload, destination)  # copy the files
 
         else:
             text = ("- WARNING: destination directory {} does not exist and I "
@@ -271,53 +271,75 @@ class GUI(QtWidgets.QMainWindow, Ui_MainWindow):
 
             logging.warning(text)
 
-    def main(self, payload):
-        """
-        Runs the entire thing
-        :return:
-        """
 
-        self.ProcessButton.setDisabled(True)
+def runner(payload):
+    """
+    Runs the entire thing
+    :return:
+    """
+
+    gui = GUI()
+
+    if not TEST:
+        gui.ProcessButton.setDisabled(True)
 
         image_path = payload[0]
         shp_path = payload[1]
         working_directory = payload[2]
         image_extension = payload[3]
 
-        text = "--Process began at {} --".format(get_datetime())
+    else:
+        image_path = "E:\\scriptTest\\input\\image"
+        shp_path = "E:\\scriptTest\\GIS_FILES"
+        working_directory = "E:\\scriptTest\\output"
+        image_extension = ".img"
 
-        # set up logfile
-        logfile = join(working_directory, 'renamer.log')
-        text = "\n* Setting up logfile: {}".format(logfile)
+    # set up logfile
+    logfile = join(working_directory, 'renamer.log')
 
-        logging.basicConfig(filename=logfile,
-                            level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%',
-                            filemode="w")
+    logging.basicConfig(filename=logfile,
+                        format='%(asctime)s %(levelname)s %(message)s',
+                        level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S',
+                        filemode="w")
 
-        logging.info("- INFO: image path: {0}, shp path: {1}, working directory: "
-                     "{2}".format(image_path, shp_path, working_directory))
+    logging.info("- INFO: image path: {0}, shp path: {1}, working directory: "
+                 "{2}".format(image_path, shp_path, working_directory))
 
-        paths = (image_path, shp_path)
+    paths = (image_path, shp_path)
 
-        # Create the directories relative to user's working directory
-        directories = (working_directory, join(working_directory, 'PSH'),
-                       join(working_directory, 'PAN'),
-                       join(working_directory, 'uncategorized_images'),
-                       join(working_directory, 'shp'))
+    # Create the directories relative to user's working directory
+    directories = (working_directory, join(working_directory, 'PSH'),
+                   join(working_directory, 'PAN'),
+                   join(working_directory, 'uncategorized_images'),
+                   join(working_directory, 'shp'))
 
-        print("* Creating directories...")
-        for directory in directories:
-            directory_creator(directory)
+    print("* Creating directories...")
+    for directory in directories:
+        directory_creator(directory)
 
-        self.create_new_filenames(paths, working_directory, image_extension)
+    gui.create_new_filenames(paths, working_directory, image_extension)
 
-        logging.info("- INFO: Finished at {})".format(get_datetime()))
-        text = "\n-- Image/Shp processing complete at {} --".format(get_datetime())
+    logging.info("- INFO: Finished at {})".format(get_datetime()))
+    text = "\n-- Image/Shp processing complete at {} --".format(get_datetime())
 
-        self.ProcessButton.setEnabled(True)
-        self.ProcessButton.setText("Process")
+    if not TEST:
+        gui.ProcessButton.setEnabled(True)
+        gui.ProcessButton.setText("Process")
 
-        print("\n** Finished at {} **".format(get_datetime()))
+    print("\n** Finished at {} **".format(get_datetime()))
+
+
+def listify_filename(filename):
+    """
+    Breaks apart filenames into lists
+    :return:
+    """
+
+    file = filename.replace('-', '_')  # replace hyphens with underscore
+    file = file.replace('.', '_')  # replace periods with underscore
+    file = file.split('_')  # split at underscores to create list
+
+    return file
 
 
 def match_shp_to_image(shp_filename_values, image_ids):
@@ -329,16 +351,14 @@ def match_shp_to_image(shp_filename_values, image_ids):
     """
 
     sid = None
-    type = None
 
     for image_id in image_ids:
         if 'PIXEL' in shp_filename_values:
             for value in shp_filename_values:
                 if value.isdigit() and len(value) == 12:
-                    if value == image_id[0]:
+                    if value == image_id:
                         sid = value  # try to match shp id to image id
-                        type = image_id[1]
-    return sid, type
+    return sid
 
 
 def create_manifest(destination, data):
@@ -351,60 +371,69 @@ def create_manifest(destination, data):
     time = get_datetime()
 
     with open(file, "a") as manifest_file:
-        manifest_file.write('- {0}: copied from {1} written to {2}\n'.format(time, data[1], data[0]))
-
-
-def get_checksum(file):
-    """
-    Returns sha1 checksum of file
-    :param file: file
-    :return: string (checksum)
-    """
-    # sha1_checksum = sha1()
-    buffer_size = 256
-
-    with open(file, 'rb') as f:
-        while True:
-            data = f.read(buffer_size)
-            return sha1(data).hexdigest()
+        manifest_file.write('- {0}: copied from {1} written to {2}\n'
+                            .format(time, data[1], data[0]))
 
 
 def file_copier(data, destination):
     """
     Copies files from source to destination
-    :param data: tuple containing source, destination, ID and image type
+    :param data: list of tuples containing (image_path, new_image_filename, shape_path, shape_name)
     :return: IO
     """
-    copied_count = 0
+    shapefile_count = 0
+    image_count = 0
 
     if exists(destination):
-        for file in data:  # copy each file
+        for item in data:  # copy each file
 
-            if not exists(file[1]):
+            image_path = item[0]
+            image_destination = item[1]
+            shpdir = dirname(realpath(item[2]))
+            _shape_output_name = item[3]
 
-                original_file = file[0]
-                new_file = file[1]
+            # Build name for shape data
+            shapefile_to_copy = []
+            shape_name = (ntpath.basename(item[2]))
+            shp_extensions = ('.shp', '.dbf', '.shx', '.prj')
 
-                original_checksum = get_checksum(original_file)
-                copyfile(original_file, new_file)
+            for extension in shp_extensions:
+                # Build list of files to copy
+                file = "{0}{1}".format(splitext(shape_name)[0], extension)
+                to_copy = join(shpdir, file)
+                shapefile_to_copy.append(to_copy)
 
-                # Ensure output file is identical to input file
-                while original_checksum != get_checksum(new_file):
-                    logging.warning("File checksum mismatch. Attempting copy again. {}"
-                                    .format(new_file))
-                    copyfile(original_file, new_file)
+                # Build new shapefile names and new paths
+                shape_output_name = "{0}{1}".format(_shape_output_name, extension)
+                new_shapefile_path = join(destination, "shp")
+                new_shapefile_path = join(new_shapefile_path, shape_output_name)
 
-                logging.info("- INFO: Copied file {0} to {1}".format(original_file, new_file))
+                # Copy the shapefiles to the new shapefile path
+                copyfile(to_copy, new_shapefile_path)
 
-                create_manifest(destination, (new_file, original_file))
-                copied_count += 1
-                print(" - Copied file {0} of {1}".format(copied_count, len(data)))
+                logging.info("- INFO: Copied shapefile {0} to {1}"
+                             .format(shapefile_to_copy, new_shapefile_path))
+
+                create_manifest(destination, (item[2], new_shapefile_path))
+                shapefile_count += 1
+
+                print(" - Copied shapefile {0} of {1}".format(shapefile_count, len(data) * 4))
+
+            if not exists(image_destination):
+
+                copyfile(image_path, image_destination)
+                logging.info("- INFO: Copied file {0} to {1}".format(image_path, image_destination))
+
+                create_manifest(destination, (image_path, image_destination))
+                image_count += 1
+                print(" - Copied file {0} of {1}".format(image_count, len(data)))
 
             else:
                 text = ("- Warning: File {} already exists in destination. "
                         "Not copying.".format(file[1]))
                 # print("\t".format(text))
                 logging.warning(text)
+
     else:
         text = ("- WARNING: directory {} does not exist and I could "
                 "not create it.".format(destination))
@@ -448,8 +477,14 @@ class DatabaseIo:
         Initialize the class
         """
 
-        # Set the DB path
+        # Define the variables
+        self.engine = None
+        self.DBSession = None
+        self.session = None
+        self.metadata = None
         self.db_path = None
+
+        # Initialize DB
         self.get_db_path()
 
     def get_db_path(self):
@@ -458,16 +493,34 @@ class DatabaseIo:
         """
 
         if getattr(sys, 'frozen', False):  # Determine if running from an executable
-            application_path = path.join(sys.path[0], "str.db")  # Get exe location
+            application_path = join(sys.path[0], "str.db")  # Get exe location
         else:
-            application_path = path.dirname(__file__)  # if not exe, just use python script loc
+            application_path = dirname(__file__)  # if not exe, just use python script loc
 
         self.db_path = path.join(application_path, 'STR.db')
+
+        return self.db_path
 
     def init_db(self):
         """
         Create .db file
         """
+
+        pass
+
+        # Create the session
+        # self.engine = create_engine('sqlite:///{}'.format(self.db_path))
+        # self.metadata = MetaData(self.engine)
+        # self.DBSession = sessionmaker(bind=self.engine)
+        # self.session = self.DBSession()
+        # self.metadata.create_all()  # Create the db
+
+    def write_to_db(self):
+        """
+        Writes data to the database
+        """
+
+        pass
 
 
 class ShapeReader:
@@ -483,22 +536,40 @@ class ShapeReader:
         Reads the shapefile
         """
 
-        pass
+        self.vector = ogr.Open(self.shape_path)
+        self.layer = self.vector.GetLayer()
+        self.feature = self.layer.GetFeature(0)
 
     def shapefile_bounds(self):
         """
         Gets the shapefile bounds (actual, not bb)
         """
+        self.read_shapefile()
+        self.vector_geometry = self.feature.GetGeometryRef()
+        self.shape_origin = self.shapefile_centroid()
 
-        pass
+        return self.vector_geometry, self.shape_origin
 
     def shapefile_centroid(self):
         """
         Gets the shapefile centroid
-
         """
+        self.polygon_points = []
+        ring = self.vector_geometry.GetGeometryRef(0)
+        points = ring.GetPointCount()
 
-        pass
+        # Build a list of points
+        for point in range(points):
+            lon, lat, z = ring.GetPoint(point)
+
+            point = Point(lon, lat)
+            self.polygon_points.append(point)
+
+        # Recreate the polygon using Shapely, and then calculate the centroid
+        polygon = Polygon([[p.x, p.y] for p in self.polygon_points])
+        polygon_centroid = Point(polygon.centroid)
+
+        return polygon_centroid
 
 
 class ImageReader:
@@ -510,6 +581,7 @@ class ImageReader:
         """
         Initialize the class
         """
+        self.image = None
         self.image_path = image_path
 
     def read_image(self):
@@ -517,21 +589,94 @@ class ImageReader:
         Read the geotiff using GDAL
         """
 
-        pass
+        self.image = gdal.Open(self.image_path)
 
     def image_bounds(self):
         """
         Get the geotiff bounding box
         """
+        self.read_image()
 
-        pass
+        self.transform = self.image.GetGeoTransform()
+
+        # Get raster properties
+        self.pixelWidth = self.transform[1]
+        self.pixelHeight = abs(self.transform[5])
+        self.cols = self.image.RasterXSize
+        self.rows = self.image.RasterYSize
+
+        # Get the vertex coordinates
+        self.x_left = self.transform[0]
+        self.y_top = self.transform[3]
+        self.x_right = self.x_left + self.cols * self.pixelWidth
+        self.y_bottom = self.y_top - self.rows * self.pixelHeight
+
+        # Create a shape using the vertex coordinates
+        self.ring = ogr.Geometry(ogr.wkbLinearRing)
+        self.ring.AddPoint(self.x_left, self.y_top)
+        self.ring.AddPoint(self.x_left, self.y_bottom)
+        self.ring.AddPoint(self.x_right, self.y_top)
+        self.ring.AddPoint(self.x_right, self.y_bottom)
+        self.ring.AddPoint(self.x_left, self.y_top)
+
+        # Add the shape to a geometry
+        self.raster_geometry = ogr.Geometry(ogr.wkbPolygon)
+        self.raster_geometry.AddGeometry(self.ring)
+
+        self.image_origin = self.image_centroid()
+        # input("Pixel width: {}".format(self.pixelWidth))
+        # input("Pixel height: {}".format(self.pixelHeight))
+
+        # input("{0}: {1},{2}".format(self.image_path, self.x_right, self.y_bottom))
+        return self.raster_geometry, self.image_origin
 
     def image_centroid(self):
         """
         Gets the image centroid
         """
 
-        pass
+        self.polygon_points = []
+
+        ring = self.raster_geometry.GetGeometryRef(0)
+        points = ring.GetPointCount()
+
+        # Build a list of points
+        for point in range(points):
+            lon, lat, z = ring.GetPoint(point)
+
+            point = Point(lon, lat)
+            self.polygon_points.append(point)
+
+        # Recreate the polygon using Shapely, and then calculate the centroid
+        polygon = Polygon([[p.x, p.y] for p in self.polygon_points])
+        raster_centroid = Point(polygon.centroid)
+
+        return raster_centroid
+
+
+def distance_between_centroids(shape_path, image_path):
+    """
+    Checks the distance between two polygon objects using Shapely
+    :param object_a: Shapely Polygon object
+    :param object_b: Shapely Polygon Object
+    :return: distance
+    """
+
+    # Temporarily reproject to get results in meters
+
+    projection = partial(
+        pyproj.transform,
+        pyproj.Proj(init='epsg:4326'),
+        pyproj.Proj(init='epsg:32639')
+
+    )
+
+    # reprojected_shape = transform(projection, shape_path)
+    # reprojected_image = transform(projection, image_path)
+    reprojected_image = image_path
+    reprojected_shape = shape_path
+
+    return reprojected_shape.distance(reprojected_image), reprojected_shape, reprojected_image
 
 
 def directory_creator(directory_to_create):
@@ -554,8 +699,50 @@ def get_datetime():
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
 
-if __name__ == '__main__':
+def intersect_shape_and_tif(image_path, shape_path):
+    """
+    Checks to see if image intersects shape
+    :param image_path: Path to image file
+    :param shape_path: Path to shapefile
+    :return: bool
+    """
+
+    # Instantiate the classes
+    shape_functions = ShapeReader(shape_path)
+    image_functions = ImageReader(image_path)
+
+    # Get feature, layer and centroids for each
+    feature, feature_centroid = shape_functions.shapefile_bounds()
+    layer, layer_centroid = image_functions.image_bounds()
+
+    return layer.Intersect(feature), feature_centroid, layer_centroid
+
+
+def main():
+    """
+    Fire off the tool
+    :return:
+    """
+
+    db_io = DatabaseIo()
+    db_io.init_db()  # Set up the DB
+
+    # Start GUI
     app = QtWidgets.QApplication(argv)
     window = GUI()
-    window.show()
-    exit(app.exec_())
+    if not TEST:
+        window.show()
+        exit(app.exec_())
+
+    else:
+        runner(None)
+
+
+if __name__ == '__main__':
+    from models import SpatialiteDb
+
+    if TEST:
+        print("*** TESTING MODE. REMOVE TEST FLAG ***")
+        app = None
+
+    main()
